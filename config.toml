@@ -1,0 +1,34 @@
+[server]
+http_addr = ":8080"
+
+[storage]
+# Relative path resolves against <root>.
+# Absolute path is used as-is.
+# Examples:
+#   data_dir = "data"                  -> <root>/data
+#   data_dir = "/var/lib/retro-bbs"    -> /var/lib/retro-bbs
+data_dir = "data"
+
+[posts]
+max_size = 65536
+title_max_size = 200
+page_size = 20
+allow_edit = true
+allow_delete = false
+
+[drafts]
+max_size = 65536
+
+[images]
+show_by_default = false
+allow_external_images = true
+max_avatar_size = 524288
+
+[security]
+max_connections_per_user = 3
+
+[search]
+enabled = true
+
+[i18n]
+default_lang = "en"

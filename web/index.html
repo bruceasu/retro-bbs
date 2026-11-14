@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RETRO BBS</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="term"></div>
+
+  <div id="editor-overlay" class="hidden">
+    <div class="editor-box">
+      <div class="editor-title" id="editor-title">EDIT</div>
+      <div class="editor-fields" id="editor-fields"></div>
+      <div class="editor-footer">
+        <span class="editor-hint" id="editor-hint"></span>
+        <span class="editor-actions">
+          <button id="editor-draft" type="button">Draft</button>
+          <button id="editor-cancel" type="button">Cancel</button>
+          <button id="editor-submit" type="button" class="primary">Submit</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/vendor/xterm/xterm.js"></script>
+  <script src="/vendor/xterm/addon-fit.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
