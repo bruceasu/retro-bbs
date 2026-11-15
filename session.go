@@ -121,7 +121,8 @@ func (s *session) handleAction(id int64, action, value string) {
 		"purge_thread", "purge_reply", "delete_board",
 		"confirm_yes", "confirm_no",
 		"restore_thread", "restore_reply", "toggle_board_hidden", "reply_action",
-		"edit_profile":
+		"edit_profile",
+		"admin_agents", "agent_new":
 		s.route(action)
 	case "quit":
 		s.sendScreen(Screen{Screen: "bye", Title: "title.goodbye",
@@ -217,6 +218,16 @@ func (s *session) route(action string) {
 		s.showAdminHiddenThreads()
 	case action == "admin_hidden_replies":
 		s.showAdminHiddenReplies()
+	case action == "admin_agents":
+		s.showAdminAgents()
+	case action == "agent_new":
+		s.showAgentNew("")
+	case strings.HasPrefix(action, "agent_view:"):
+		s.showAgentView(strings.TrimPrefix(action, "agent_view:"))
+	case strings.HasPrefix(action, "agent_rotate:"):
+		s.rotateAgentKey(strings.TrimPrefix(action, "agent_rotate:"))
+	case strings.HasPrefix(action, "agent_delete:"):
+		s.deleteAgent(strings.TrimPrefix(action, "agent_delete:"))
 	case action == "board_new":
 		s.showBoardNew("")
 	case action == "back":
@@ -305,6 +316,8 @@ func (s *session) goBack() {
 	case "delete_confirm", "purge_confirm":
 		s.pendingDelete = nil
 		s.repaint()
+	case "admin_agents", "agent_new", "agent_view", "agent_created":
+		s.showAdminAgents()
 	case "new_thread", "reply", "edit_thread":
 		switch s.prevScreen {
 		case "draft_list":
@@ -370,6 +383,12 @@ func (s *session) repaint() {
 		s.showAdminHiddenThreads()
 	case "admin_hidden_replies":
 		s.showAdminHiddenReplies()
+	case "admin_agents":
+		s.showAdminAgents()
+	case "agent_new":
+		s.showAgentNew("")
+	case "agent_view":
+		s.showAgentView(s.username)
 	case "board_admin":
 		s.showBoardAdmin(s.boardID)
 	case "board_new":

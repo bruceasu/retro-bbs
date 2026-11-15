@@ -100,11 +100,17 @@ func (s *session) showThreadRead() {
 	var authorName string
 	_ = db.QueryRow(`SELECT username FROM users WHERE id = ?`, authorID).Scan(&authorName)
 
+	var authorIsAgent int
+	_ = db.QueryRow(`SELECT is_agent FROM users WHERE id = ?`, authorID).Scan(&authorIsAgent)
+	authorDisplay := authorName
+	if authorIsAgent == 1 {
+		authorDisplay = authorName + " [AI]"
+	}
 	body, _ := readFile(filePath)
 	sc := s.baseScreen("thread_read", "title.thread")
 	sc.Lines = append(sc.Lines,
 		Line{Raw: title, Kind: "h1"},
-		Line{Key: "msg.thread_meta", Args: []string{authorName, fmtTime(created)}, Kind: "author"},
+		Line{Key: "msg.thread_meta", Args: []string{authorDisplay, fmtTime(created)}, Kind: "author"},
 		Line{},
 	)
 	sc.Lines = append(sc.Lines, markdownToLines(string(body), s.imagesOn)...)
@@ -122,9 +128,16 @@ func (s *session) showThreadRead() {
 			var aid, uname, pfile string
 			var pcreated int64
 			_ = rows.Scan(&aid, &uname, &pfile, &pcreated)
+			var pIsAgent int
+			_ = db.QueryRow(`SELECT is_agent FROM users WHERE id = ?`, aid).Scan(&pIsAgent)
+			unameDisplay := uname
+			if pIsAgent == 1 {
+				unameDisplay = uname + " [AI]"
+			}
+			// 用 unameDisplay 替换 uname
 			pbody, _ := readFile(pfile)
 			sc.Lines = append(sc.Lines,
-				Line{Key: "msg.reply_meta", Args: []string{strconv.Itoa(idx), uname, fmtTime(pcreated)}, Kind: "author"},
+				Line{Key: "msg.reply_meta", Args: []string{strconv.Itoa(idx), unameDisplay, fmtTime(pcreated)}, Kind: "author"},
 			)
 			sc.Lines = append(sc.Lines, markdownToLines(string(pbody), s.imagesOn)...)
 			sc.Lines = append(sc.Lines, Line{})

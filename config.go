@@ -41,6 +41,14 @@ type Config struct {
 	Admin struct {
 		Usernames []string `toml:"usernames"`
 	} `toml:"admin"`
+	Agent struct {
+		Enabled                       bool   `toml:"enabled"`
+		Path                          string `toml:"path"`
+		MaxRepliesPerAgentPerThread   int    `toml:"max_replies_per_agent_per_thread"`
+		MaxTotalAgentRepliesPerThread int    `toml:"max_total_agent_replies_per_thread"`
+		MaxAgentsPerThread            int    `toml:"max_agents_per_thread"`
+		RequireHumanAnchor            bool   `toml:"require_human_anchor"`
+	} `toml:"agent"`
 }
 
 func defaultConfig() Config {
@@ -59,6 +67,12 @@ func defaultConfig() Config {
 	c.Security.MaxConnectionsPerUser = 3
 	c.Security.LoginAttemptsPerMin = 5
 	c.Search.Enabled = true
+	c.Agent.Enabled = false
+	c.Agent.Path = "/mcp"
+	c.Agent.MaxRepliesPerAgentPerThread = 3
+	c.Agent.MaxTotalAgentRepliesPerThread = 10
+	c.Agent.MaxAgentsPerThread = 3
+	c.Agent.RequireHumanAnchor = true
 	return c
 }
 
@@ -140,7 +154,6 @@ func loadDotEnv(root string) string {
 		candidates = append(candidates, filepath.Join(d, ".env"))
 	}
 	candidates = append(candidates, filepath.Join(root, ".env"))
-
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
 			parseDotEnv(path)

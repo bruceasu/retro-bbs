@@ -16,7 +16,6 @@ type pendingDelete struct {
 }
 
 // ---------- 入口 ----------
-
 func (s *session) showAdmin() {
 	if !s.isAdmin {
 		s.sendError(0, "FORBIDDEN", "admin only")
@@ -28,17 +27,20 @@ func (s *session) showAdmin() {
 	sc.Lines = []Line{
 		{Key: "msg.admin_prompt"}, Line{},
 	}
-	var hiddenThreads, hiddenReplies int
+	var hiddenThreads, hiddenReplies, agentCount int
 	_ = db.QueryRow(`SELECT COUNT(*) FROM threads WHERE hidden = 1`).Scan(&hiddenThreads)
 	_ = db.QueryRow(`SELECT COUNT(*) FROM posts WHERE hidden = 1`).Scan(&hiddenReplies)
+	_ = db.QueryRow(`SELECT COUNT(*) FROM users WHERE is_agent = 1 AND status = 'active'`).Scan(&agentCount)
 	sc.Lines = append(sc.Lines,
 		Line{Key: "msg.admin_hidden_counts", Args: []string{itoa(hiddenThreads), itoa(hiddenReplies)}, Kind: "author"},
+		Line{Key: "msg.admin_agent_count", Args: []string{itoa(agentCount)}, Kind: "author"},
 		Line{},
 	)
 	sc.Menu = []MenuItem{
 		{Key: "b", LabelKey: "menu.admin_boards", Action: "admin_boards"},
 		{Key: "t", LabelKey: "menu.admin_hidden_threads", Action: "admin_hidden_threads"},
 		{Key: "r", LabelKey: "menu.admin_hidden_replies", Action: "admin_hidden_replies"},
+		{Key: "a", LabelKey: "menu.admin_agents", Action: "admin_agents"},
 		{Key: "q", LabelKey: "menu.back_home", Action: "home"},
 	}
 	sc.Hint = "hint.select"

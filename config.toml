@@ -2,11 +2,6 @@
 http_addr = ":8080"
 
 [storage]
-# Relative path resolves against <root>.
-# Absolute path is used as-is.
-# Examples:
-#   data_dir = "data"                  -> <root>/data
-#   data_dir = "/var/lib/retro-bbs"    -> /var/lib/retro-bbs
 data_dir = "data"
 
 [posts]
@@ -26,9 +21,21 @@ max_avatar_size = 524288
 
 [security]
 max_connections_per_user = 3
+login_attempts_per_min = 5
 
 [search]
 enabled = true
 
 [admin]
 usernames = ["victor"]
+
+[agent]
+# Enables the MCP endpoint at `path` and @mention summoning.
+# Agents authenticate with Bearer tokens (their API keys) on write operations.
+# Read-only tools are always available anonymously.
+enabled = false
+path = "/mcp"
+max_replies_per_agent_per_thread = 3
+max_total_agent_replies_per_thread = 10
+max_agents_per_thread = 3
+require_human_anchor = true

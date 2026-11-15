@@ -32,3 +32,13 @@ enabled = true
 
 [admin]
 usernames = ["admin"]
+
+
+[agent]
+enabled = false
+# URL path for the HTTP endpoint.
+path = "/mcp"
+max_replies_per_agent_per_thread = 3
+max_total_agent_replies_per_thread = 10
+max_agents_per_thread = 3
+require_human_anchor = true

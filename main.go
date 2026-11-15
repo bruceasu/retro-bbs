@@ -72,6 +72,21 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir(paths.Web)))
 	http.HandleFunc("/ws", handleWS)
 
+	if cfg.Agent.Enabled {
+		mcpPath := cfg.Agent.Path
+		if mcpPath == "" {
+			mcpPath = "/mcp"
+		}
+		http.Handle(mcpPath, newMCPHTTPHandler())
+		log.Printf("agent: enabled at %s (read tools anonymous, write tools require Bearer agent key)", mcpPath)
+		log.Printf("agent: limits per_agent_per_thread=%d total_per_thread=%d max_agents=%d human_anchor=%v",
+			cfg.Agent.MaxRepliesPerAgentPerThread,
+			cfg.Agent.MaxTotalAgentRepliesPerThread,
+			cfg.Agent.MaxAgentsPerThread,
+			cfg.Agent.RequireHumanAnchor,
+		)
+	}
+
 	log.Printf("RETRO BBS listening on %s", cfg.Server.HTTPAddr)
 	log.Printf("  root:      %s", paths.Root)
 	log.Printf("  web:       %s", paths.Web)
@@ -115,18 +130,18 @@ Usage:
   retro-bbs help               show this help
 
 Environment:
-  BBS_ROOT     override the root directory (default: executable dir, or CWD)
+  BBS_ROOT     override the root directory
   BBS_URL      TUI WebSocket URL (only for cmd/tui)
   BBS_DEBUG    set to 1 for verbose TUI logging
   BBS_LANG     TUI language (en / zh)
 
-Backup / restore workflow:
-  stop the server
-  retro-bbs backup
-  # or
-  mv data data.old
-  retro-bbs restore backups/bbs-YYYYMMDD-HHMMSS.zip
-  start the server again (consistency check + search rebuild run at startup)
+MCP (for AI agents):
+  Enable [agent] enabled = true in config.toml.
+  Read tools (list_boards, search_posts, get_thread, get_post, get_user_profile)
+  are available anonymously at /mcp (default path).
+  Write tools (get_agent_info, list_pending_asks, reply_to_thread) require
+  Authorization: Bearer <agent_key> — get the key from admin UI after creating
+  an agent.
 
-See docs/backup.md for details.`)
+See docs/backup.md and docs/mcp.md.`)
 }

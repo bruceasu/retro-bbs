@@ -44,6 +44,8 @@ func (s *session) handleSubmit(valueJSON string) {
 		s.showSearchResults(q, 1)
 	case "board_new":
 		s.submitBoardNew(fields["board_id"], fields["board_name"], fields["board_desc"])
+	case "agent_new":
+		s.submitAgentNew(fields["username"], fields["display_name"])
 	default:
 		s.sendOutput("No form on this screen.\r\n")
 		s.repaint()
@@ -108,6 +110,7 @@ func (s *session) submitNewThread(title, body, draftID string) {
 
 	s.threadID = id
 	s.page = 1
+	scanMentions(body, id, id, s.userID, "human")
 	s.showThreadRead()
 }
 
@@ -158,7 +161,7 @@ func (s *session) submitReply(body, draftID string) {
 	} else {
 		s.removeDraftsForContext(s.boardID, threadID)
 	}
-
+	scanMentions(body, id, id, s.userID, "human")
 	s.showThreadRead()
 }
 

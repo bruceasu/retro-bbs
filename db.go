@@ -82,6 +82,31 @@ func initDB() error {
 			body,
 			updated_at UNINDEXED
 		);
+		CREATE TABLE IF NOT EXISTS agent_asks (
+		    id TEXT PRIMARY KEY,
+		    thread_id TEXT NOT NULL,
+		    post_id TEXT NOT NULL,
+		    agent_id TEXT NOT NULL,
+		    caller_id TEXT NOT NULL,
+		    caller_kind TEXT NOT NULL,
+		    question TEXT NOT NULL,
+		    status TEXT NOT NULL DEFAULT 'pending',
+		    created_at INTEGER NOT NULL,
+		    answered_at INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS idx_agent_asks_status ON agent_asks(status, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_agent_asks_agent ON agent_asks(agent_id, status);
+		CREATE INDEX IF NOT EXISTS idx_agent_asks_thread ON agent_asks(thread_id);
+
+		CREATE TABLE IF NOT EXISTS agent_actions (
+		    id TEXT PRIMARY KEY,
+		    agent_id TEXT NOT NULL,
+		    action TEXT NOT NULL,
+		    target_id TEXT NOT NULL,
+		    ask_id TEXT NOT NULL DEFAULT '',
+		    created_at INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_agent_actions_agent ON agent_actions(agent_id, created_at DESC);
 	`)
 	if err != nil {
 		return err
@@ -91,6 +116,18 @@ func initDB() error {
 		return err
 	}
 	if err := ensureColumn("posts", "hidden", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn("users", "is_agent", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn("users", "agent_owner_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn("users", "api_key_hash", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn("users", "agent_display_name", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := seedBoards(); err != nil {

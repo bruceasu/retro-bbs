@@ -5,8 +5,6 @@ import (
 	"unicode"
 )
 
-// markdownToLines 把 Markdown 文本解析为 []Line。
-// imagesOn 控制 ![](url) 是否显示 URL；关闭时只显示 [image: alt]。
 func markdownToLines(md string, imagesOn bool) []Line {
 	var out []Line
 	lines := strings.Split(md, "\n")
@@ -17,7 +15,6 @@ func markdownToLines(md string, imagesOn bool) []Line {
 	for _, raw := range lines {
 		line := strings.TrimRight(raw, "\r")
 
-		// 围栏代码块
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			if !inCode {
 				inCode = true
@@ -40,20 +37,14 @@ func markdownToLines(md string, imagesOn bool) []Line {
 		}
 
 		trim := strings.TrimSpace(line)
-
-		// 空行
 		if trim == "" {
 			out = append(out, Line{})
 			continue
 		}
-
-		// 水平线
 		if isHR(trim) {
 			out = append(out, Line{Raw: strings.Repeat("─", 40), Kind: "hr"})
 			continue
 		}
-
-		// 标题
 		if strings.HasPrefix(trim, "### ") {
 			out = append(out, Line{Raw: strings.TrimPrefix(trim, "### "), Kind: "h2"})
 			continue
@@ -66,23 +57,17 @@ func markdownToLines(md string, imagesOn bool) []Line {
 			out = append(out, Line{Raw: strings.TrimPrefix(trim, "# "), Kind: "h1"})
 			continue
 		}
-
-		// 引用
 		if strings.HasPrefix(trim, "> ") {
 			spans := parseInline(strings.TrimPrefix(trim, "> "), imagesOn)
 			out = append(out, Line{Spans: spans, Kind: "quote"})
 			continue
 		}
-
-		// 列表
 		if m, ok := listPrefix(trim); ok {
 			content := strings.TrimSpace(trim[len(m):])
 			spans := parseInline(content, imagesOn)
 			out = append(out, Line{Spans: prependSpan(Span{Text: m}, spans), Kind: ""})
 			continue
 		}
-
-		// 普通段落
 		out = append(out, Line{Spans: parseInline(trim, imagesOn)})
 	}
 	return out
@@ -108,11 +93,9 @@ func isHR(s string) bool {
 }
 
 func listPrefix(s string) (string, bool) {
-	// 无序：- * +
 	if len(s) >= 2 && (s[0] == '-' || s[0] == '*' || s[0] == '+') && s[1] == ' ' {
 		return "  • ", true
 	}
-	// 有序：1. 2) 等
 	i := 0
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 		i++
@@ -130,7 +113,30 @@ func prependSpan(first Span, rest []Span) []Span {
 	return out
 }
 
-// parseInline 处理 **bold**、*italic*、`code`、[text](url)、![alt](url)
+// isSafeURL 只允许 http:// https:// mailto: 和相对路径。
+// 防止 javascript: data: file: 等危险 scheme。
+func isSafeURL(u string) bool {
+	u = strings.TrimSpace(strings.ToLower(u))
+	if u == "" {
+		return false
+	}
+	// 显式 scheme 检查
+	if idx := strings.Index(u, ":"); idx > 0 {
+		// 可能是 scheme（: 前面没有 /）
+		if !strings.Contains(u[:idx], "/") {
+			scheme := u[:idx]
+			switch scheme {
+			case "http", "https", "mailto":
+				return true
+			default:
+				return false
+			}
+		}
+	}
+	// 无 scheme：相对路径允许
+	return true
+}
+
 func parseInline(s string, imagesOn bool) []Span {
 	var spans []Span
 	var buf strings.Builder
@@ -144,12 +150,12 @@ func parseInline(s string, imagesOn bool) []Span {
 
 	i := 0
 	for i < len(s) {
-		// 图片 ![](url) 或 ![alt](url)
+		// 图片 ![alt](url)
 		if s[i] == '!' && i+1 < len(s) && s[i+1] == '[' {
 			if alt, url, n, ok := parseLink(s[i+1:]); ok {
 				flush()
 				label := "[image: " + alt + "]"
-				if imagesOn && url != "" {
+				if imagesOn && url != "" && isSafeURL(url) {
 					label += " " + url
 				}
 				spans = append(spans, Span{Text: label, Style: "link", URL: url})
@@ -161,12 +167,16 @@ func parseInline(s string, imagesOn bool) []Span {
 		if s[i] == '[' {
 			if text, url, n, ok := parseLink(s[i:]); ok {
 				flush()
-				spans = append(spans, Span{Text: text, Style: "link", URL: url})
+				if isSafeURL(url) {
+					spans = append(spans, Span{Text: text, Style: "link", URL: url})
+				} else {
+					// 不安全 URL：只显示文本，不显示 URL
+					spans = append(spans, Span{Text: text})
+				}
 				i += n
 				continue
 			}
 		}
-		// 行内代码 `code`
 		if s[i] == '`' {
 			if j := strings.IndexByte(s[i+1:], '`'); j >= 0 {
 				flush()
@@ -175,7 +185,6 @@ func parseInline(s string, imagesOn bool) []Span {
 				continue
 			}
 		}
-		// 粗体 **x**
 		if strings.HasPrefix(s[i:], "**") {
 			if j := strings.Index(s[i+2:], "**"); j >= 0 {
 				flush()
@@ -184,7 +193,6 @@ func parseInline(s string, imagesOn bool) []Span {
 				continue
 			}
 		}
-		// 斜体 *x*（排除 ** 已处理）
 		if s[i] == '*' && !strings.HasPrefix(s[i:], "**") {
 			if j := strings.IndexByte(s[i+1:], '*'); j >= 0 {
 				flush()
@@ -203,7 +211,6 @@ func parseInline(s string, imagesOn bool) []Span {
 	return spans
 }
 
-// parseLink 解析 [text](url)，返回 text,url,consumed,ok
 func parseLink(s string) (string, string, int, bool) {
 	if len(s) < 4 || s[0] != '[' {
 		return "", "", 0, false
