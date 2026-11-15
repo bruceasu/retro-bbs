@@ -3,7 +3,7 @@
   "projectName": "retro-bbs",
 
   // Go build entry package/file. If empty: main.go (if exists) else "."
-  "entry": ".",
+  "entry": "./cmd/retro-bbs",
 
   // Build artifact directory.
   "outputDir": "bin",

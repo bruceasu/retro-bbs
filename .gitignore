@@ -4,3 +4,4 @@ pacakges/
 data/
 .env
 *.log
+config.toml

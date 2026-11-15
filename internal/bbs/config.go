@@ -1,4 +1,4 @@
-package main
+package bbs
 
 import (
 	"log"
@@ -96,12 +96,17 @@ func resolveRoot() string {
 		return v
 	}
 	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		if _, err := os.Stat(filepath.Join(dir, "web")); err == nil {
-			return dir
-		}
-		if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
-			return dir
+		for dir := filepath.Dir(exe); ; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, "web")); err == nil {
+				return dir
+			}
+			if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
 		}
 	}
 	if cwd, err := os.Getwd(); err == nil {

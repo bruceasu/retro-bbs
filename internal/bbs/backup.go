@@ -1,4 +1,4 @@
-package main
+package bbs
 
 import (
 	"archive/zip"
@@ -109,12 +109,12 @@ func runBackupCmd() {
 
 // runRestoreCmd 实现 `retro-bbs restore <archive.zip>`。
 // 安全规则：data/bbs.db 已存在则拒绝，防止误覆盖。
-func runRestoreCmd() {
-	if len(os.Args) < 3 {
+func runRestoreCmd(args []string) {
+	if len(args) < 3 {
 		fmt.Fprintln(os.Stderr, "usage: retro-bbs restore <archive.zip>")
 		os.Exit(1)
 	}
-	archivePath := os.Args[2]
+	archivePath := args[2]
 	if _, err := os.Stat(archivePath); err != nil {
 		log.Fatalf("restore: archive not found: %s", archivePath)
 	}
