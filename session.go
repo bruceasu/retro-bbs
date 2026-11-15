@@ -27,16 +27,27 @@ type session struct {
 	userID   string
 	username string
 	nickname string
+	isAdmin  bool
 
 	boardID    string
 	threadID   string
+	replyID    string
 	draftID    string
-	prevScreen string // 进入表单屏之前的屏幕名，用于删除草稿后返回
+	prevScreen string
 	page       int
+
+	searchQuery string
+	searchPage  int
+
+	remoteAddr string
+	connUserID string
+
+	pendingDelete *pendingDelete
 }
 
 func (s *session) run() {
 	s.mu = make(chan struct{}, 1)
+	defer s.releaseConn()
 
 	defer s.conn.Close()
 	s.conn.SetReadLimit(maxMessageSize)
@@ -104,7 +115,13 @@ func (s *session) handleAction(id int64, action, value string) {
 		s.handleSaveDraft(value)
 	case "page":
 		s.doPage(value)
-	case "new_thread", "reply", "edit_thread", "toggle_images", "profile", "help", "lang":
+	case "new_thread", "reply", "edit_thread", "toggle_images", "profile", "help", "lang", "search",
+		"admin", "admin_boards", "admin_hidden_threads", "admin_hidden_replies",
+		"board_new", "reply_manage", "delete_thread", "delete_reply",
+		"purge_thread", "purge_reply", "delete_board",
+		"confirm_yes", "confirm_no",
+		"restore_thread", "restore_reply", "toggle_board_hidden", "reply_action",
+		"edit_profile":
 		s.route(action)
 	case "quit":
 		s.sendScreen(Screen{Screen: "bye", Title: "title.goodbye",
@@ -146,39 +163,91 @@ func (s *session) route(action string) {
 	case action == "lang":
 		s.showLang()
 	case action == "logout":
-		s.userID, s.username, s.nickname = "", "", ""
+		_ = s.setUser("", "", "")
 		s.showHome("flash.logged_out", "")
 	case action == "drafts":
 		s.showDraftList()
 	case action == "profile":
 		s.showProfile()
+	case action == "edit_profile" && s.userID != "":
+		s.showProfileEdit("")
 	case action == "toggle_images":
 		s.imagesOn = !s.imagesOn
 		s.repaint()
+	case action == "search":
+		s.showSearch("")
+	case action == "search_again":
+		s.showSearch(s.searchQuery)
 	case action == "new_thread" && s.boardID != "":
 		s.showNewThread("", "", "", "")
 	case action == "reply" && s.threadID != "":
 		s.showReply("", "", "")
 	case action == "edit_thread" && s.threadID != "":
 		s.showEditThread("")
+	case action == "reply_manage" && s.threadID != "":
+		s.showReplyManage()
+	case action == "reply_action" && s.threadID != "" && s.replyID != "":
+		s.showReplyAction()
+	case action == "delete_thread":
+		s.prepareDeleteThread()
+	case action == "delete_reply":
+		s.prepareDeleteReply()
+	case action == "purge_thread":
+		s.preparePurgeThread()
+	case action == "purge_reply":
+		s.preparePurgeReply()
+	case action == "delete_board":
+		s.prepareDeleteBoard()
+	case action == "confirm_yes":
+		s.executePendingDelete()
+	case action == "confirm_no":
+		s.pendingDelete = nil
+		s.repaint()
+	case action == "restore_thread":
+		s.restoreThread(s.threadID)
+	case action == "restore_reply":
+		s.restoreReply(s.replyID)
+	case action == "toggle_board_hidden":
+		s.toggleBoardHidden(s.boardID)
+	case action == "admin":
+		s.showAdmin()
+	case action == "admin_boards":
+		s.showAdminBoards()
+	case action == "admin_hidden_threads":
+		s.showAdminHiddenThreads()
+	case action == "admin_hidden_replies":
+		s.showAdminHiddenReplies()
+	case action == "board_new":
+		s.showBoardNew("")
 	case action == "back":
 		s.goBack()
 	case action == "quit":
 		s.sendScreen(Screen{Screen: "bye", Title: "title.goodbye",
 			Lines: []Line{{Key: "msg.goodbye"}}})
+	case strings.HasPrefix(action, "board_admin:"):
+		s.showBoardAdmin(strings.TrimPrefix(action, "board_admin:"))
 	case strings.HasPrefix(action, "board:"):
 		s.boardID = strings.TrimPrefix(action, "board:")
 		s.page = 1
 		s.showThreadList("", "")
 	case strings.HasPrefix(action, "thread:"):
 		s.threadID = strings.TrimPrefix(action, "thread:")
+		s.replyID = ""
 		s.showThreadRead()
+	case strings.HasPrefix(action, "post:"):
+		rest := strings.TrimPrefix(action, "post:")
+		parts := strings.SplitN(rest, ":", 2)
+		s.replyID = parts[0]
+		if len(parts) == 2 && parts[1] != "" {
+			s.threadID = parts[1]
+		}
+		s.showReplyAction()
 	case strings.HasPrefix(action, "draft_open:"):
 		s.openDraft(strings.TrimPrefix(action, "draft_open:"))
 	case strings.HasPrefix(action, "draft_del:"):
 		s.deleteDraft(strings.TrimPrefix(action, "draft_del:"))
 	case strings.HasPrefix(action, "lang:"):
-		// 客户端本地处理，服务端不响应
+		// 客户端本地处理
 	default:
 		s.sendOutput("Unknown: " + action + "\r\n")
 		s.repaint()
@@ -186,15 +255,21 @@ func (s *session) route(action string) {
 }
 
 func (s *session) doPage(dir string) {
-	if s.screen != "thread_list" {
-		return
-	}
-	if dir == "prev" && s.page > 1 {
-		s.page--
-		s.showThreadList("", "")
-	} else if dir == "next" {
-		s.page++
-		s.showThreadList("", "")
+	switch s.screen {
+	case "thread_list":
+		if dir == "prev" && s.page > 1 {
+			s.page--
+			s.showThreadList("", "")
+		} else if dir == "next" {
+			s.page++
+			s.showThreadList("", "")
+		}
+	case "search_results":
+		if dir == "prev" && s.searchPage > 1 {
+			s.showSearchResults(s.searchQuery, s.searchPage-1)
+		} else if dir == "next" {
+			s.showSearchResults(s.searchQuery, s.searchPage+1)
+		}
 	}
 }
 
@@ -202,12 +277,35 @@ func (s *session) goBack() {
 	switch s.screen {
 	case "thread_read":
 		s.threadID = ""
+		s.replyID = ""
 		s.showThreadList("", "")
+	case "reply_manage":
+		s.replyID = ""
+		s.showThreadRead()
+	case "reply_action":
+		s.replyID = ""
+		s.showReplyManage()
 	case "thread_list":
 		s.boardID = ""
 		s.showBoards()
+	case "search_results":
+		s.showSearch(s.searchQuery)
+	case "admin":
+		s.showHome("", "")
+	case "admin_boards":
+		s.showAdmin()
+	case "admin_hidden_threads":
+		s.showAdmin()
+	case "admin_hidden_replies":
+		s.showAdmin()
+	case "board_admin":
+		s.showAdminBoards()
+	case "board_new":
+		s.showAdminBoards()
+	case "delete_confirm", "purge_confirm":
+		s.pendingDelete = nil
+		s.repaint()
 	case "new_thread", "reply", "edit_thread":
-		// 表单 Esc：回到 prevScreen 或根据上下文
 		switch s.prevScreen {
 		case "draft_list":
 			s.showDraftList()
@@ -231,7 +329,7 @@ func (s *session) goBack() {
 		s.prevScreen = ""
 	case "profile_edit":
 		s.showProfile()
-	case "draft_list", "profile", "lang", "login", "register", "boards", "help":
+	case "draft_list", "profile", "lang", "login", "register", "boards", "help", "search":
 		s.showHome("", "")
 	default:
 		s.showHome("", "")
@@ -260,8 +358,32 @@ func (s *session) repaint() {
 		s.showLang()
 	case "help":
 		s.showHelp()
+	case "search":
+		s.showSearch("")
+	case "search_results":
+		s.showSearchResults(s.searchQuery, s.searchPage)
+	case "admin":
+		s.showAdmin()
+	case "admin_boards":
+		s.showAdminBoards()
+	case "admin_hidden_threads":
+		s.showAdminHiddenThreads()
+	case "admin_hidden_replies":
+		s.showAdminHiddenReplies()
+	case "board_admin":
+		s.showBoardAdmin(s.boardID)
+	case "board_new":
+		s.showBoardNew("")
+	case "reply_manage":
+		s.showReplyManage()
+	case "reply_action":
+		s.showReplyAction()
+	case "delete_confirm":
+		s.showDeleteConfirm()
+	case "purge_confirm":
+		s.showPurgeConfirm()
 	case "new_thread", "reply", "edit_thread", "profile_edit":
-		// 表单屏不 repaint，避免丢失编辑状态
+		// 表单屏不 repaint
 	default:
 		s.showHome("", "")
 	}
@@ -272,6 +394,7 @@ func (s *session) sendScreen(sc Screen) {
 	raw, _ := json.Marshal(sc)
 	s.sendRaw(Message{Type: "screen", Data: raw})
 }
+
 func (s *session) sendOutput(text string) {
 	s.sendRaw(Message{Type: "output", Text: text})
 }

@@ -25,6 +25,7 @@ func (s *session) showHome(flashKey, flashArg string) {
 
 	menu := []MenuItem{
 		{Key: "b", LabelKey: "menu.boards", Action: "boards"},
+		{Key: "s", LabelKey: "menu.search", Action: "search"},
 		{Key: "d", LabelKey: "menu.drafts", Action: "drafts"},
 		{Key: "g", LabelKey: "menu.language", Action: "lang"},
 		{Key: "h", LabelKey: "menu.help", Action: "help"},
@@ -37,8 +38,11 @@ func (s *session) showHome(flashKey, flashArg string) {
 	} else {
 		menu = append(menu,
 			MenuItem{Key: "p", LabelKey: "menu.profile", Action: "profile"},
-			MenuItem{Key: "o", LabelKey: "menu.logout", Action: "logout"},
 		)
+		if s.isAdmin {
+			menu = append(menu, MenuItem{Key: "a", LabelKey: "menu.admin", Action: "admin"})
+		}
+		menu = append(menu, MenuItem{Key: "o", LabelKey: "menu.logout", Action: "logout"})
 	}
 	menu = append(menu, MenuItem{Key: "q", LabelKey: "menu.quit", Action: "quit"})
 	sc.Menu = menu
@@ -46,13 +50,10 @@ func (s *session) showHome(flashKey, flashArg string) {
 	s.sendScreen(sc)
 }
 
-// showLang 只描述"可选语言列表"。客户端识别 lang:xx 后本地处理。
 func (s *session) showLang() {
 	s.screen = "lang"
 	sc := s.baseScreen("lang", "title.language")
-	sc.Lines = []Line{
-		{Key: "msg.choose_language"}, Line{},
-	}
+	sc.Lines = []Line{{Key: "msg.choose_language"}, Line{}}
 	sc.Menu = []MenuItem{
 		{Key: "1", Label: "English", Action: "lang:en"},
 		{Key: "2", Label: "中文", Action: "lang:zh"},
@@ -99,7 +100,7 @@ func (s *session) showBoards() {
 	s.boardID = ""
 	s.threadID = ""
 
-	rows, err := db.Query(`SELECT id, name, description FROM boards ORDER BY id`)
+	rows, err := db.Query(`SELECT id, name, description FROM boards WHERE hidden = 0 ORDER BY id`)
 	if err != nil {
 		s.sendOutput("DB error: " + err.Error() + "\r\n")
 		return
@@ -134,7 +135,7 @@ func (s *session) showHelp() {
 		{Key: "help.keys_title"}, Line{},
 		{Key: "help.updown"}, {Key: "help.enter"}, {Key: "help.esc"},
 		{Key: "help.leftright"}, {Key: "help.n"}, {Key: "help.r"}, {Key: "help.e"},
-		{Key: "help.bhq"}, {Key: "help.lang"}, {Key: "help.images"}, Line{},
+		{Key: "help.search"}, {Key: "help.bhq"}, {Key: "help.lang"}, {Key: "help.images"}, Line{},
 		{Key: "help.markdown"}, {Key: "help.editor"}, Line{},
 		{Key: "help.max_size", Args: []string{strconv.Itoa(cfg.Posts.MaxSize)}},
 	}
@@ -194,5 +195,88 @@ func (s *session) showDraftList() {
 	menu = append(menu, MenuItem{Key: "b", LabelKey: "menu.back_home", Action: "home"})
 	sc.Menu = menu
 	sc.Hint = "hint.draft_list"
+	s.sendScreen(sc)
+}
+
+// ---------- 搜索屏 ----------
+
+func (s *session) showSearch(prefill string) {
+	s.screen = "search"
+	sc := s.baseScreen("search", "title.search")
+	sc.Lines = []Line{
+		{Key: "msg.search_prompt"}, Line{},
+		{Key: "msg.search_note", Kind: "author"}, Line{},
+	}
+	sc.Form = &Form{
+		Fields: []FormField{
+			{Name: "query", LabelKey: "field.search_query", Value: prefill},
+		},
+		Submit: "submit",
+	}
+	sc.Hint = "hint.search"
+	s.sendScreen(sc)
+}
+
+func (s *session) showSearchResults(query string, page int) {
+	s.screen = "search_results"
+	s.searchQuery = query
+	if page < 1 {
+		page = 1
+	}
+
+	results, total, err := searchPosts(query, searchPageSize, (page-1)*searchPageSize)
+	if err != nil {
+		s.sendOutput("search error: " + err.Error() + "\r\n")
+		s.showSearch(query)
+		return
+	}
+
+	totalPage := (total + searchPageSize - 1) / searchPageSize
+	if totalPage < 1 {
+		totalPage = 1
+	}
+	if page > totalPage {
+		page = totalPage
+	}
+	s.searchPage = page
+
+	sc := s.baseScreen("search_results", "title.search_results")
+	sc.Lines = []Line{
+		{Key: "msg.search_query", Args: []string{query}, Kind: "info"},
+		{Key: "msg.search_total", Args: []string{strconv.Itoa(total)}, Kind: "author"},
+		{Key: "msg.page", Args: []string{strconv.Itoa(page), strconv.Itoa(totalPage)}, Kind: "author"},
+		Line{},
+	}
+
+	key := 1
+	var menu []MenuItem
+	for _, r := range results {
+		kindLabel := "T"
+		if r.Kind == "post" {
+			kindLabel = "R"
+		}
+		label := fmt.Sprintf("[%s] %-40s %s  %s",
+			kindLabel, trunc(r.Title, 40), r.Author, fmtRelTime(r.Updated))
+		menu = append(menu, MenuItem{
+			Key:    strconv.Itoa(key),
+			Label:  label,
+			Action: "thread:" + r.ThreadID,
+		})
+		key++
+	}
+	if len(menu) == 0 {
+		sc.Lines = append(sc.Lines, Line{Key: "msg.no_results", Kind: "author"}, Line{})
+	}
+	menu = append(menu,
+		MenuItem{Key: "s", LabelKey: "menu.search_again", Action: "search_again"},
+		MenuItem{Key: "b", LabelKey: "menu.back_home", Action: "home"},
+	)
+
+	sc.Menu = menu
+	sc.Hint = "hint.search_results"
+	sc.Page = page
+	sc.TotalPage = totalPage
+	sc.CanPrev = page > 1
+	sc.CanNext = page < totalPage
 	s.sendScreen(sc)
 }

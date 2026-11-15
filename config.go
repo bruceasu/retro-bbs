@@ -33,10 +33,14 @@ type Config struct {
 	} `toml:"images"`
 	Security struct {
 		MaxConnectionsPerUser int `toml:"max_connections_per_user"`
+		LoginAttemptsPerMin   int `toml:"login_attempts_per_min"`
 	} `toml:"security"`
 	Search struct {
 		Enabled bool `toml:"enabled"`
 	} `toml:"search"`
+	Admin struct {
+		Usernames []string `toml:"usernames"`
+	} `toml:"admin"`
 }
 
 func defaultConfig() Config {
@@ -53,6 +57,7 @@ func defaultConfig() Config {
 	c.Images.AllowExternalImages = true
 	c.Images.MaxAvatarSize = 524288
 	c.Security.MaxConnectionsPerUser = 3
+	c.Security.LoginAttemptsPerMin = 5
 	c.Search.Enabled = true
 	return c
 }

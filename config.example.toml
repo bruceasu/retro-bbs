@@ -29,3 +29,6 @@ max_connections_per_user = 3
 
 [search]
 enabled = true
+
+[admin]
+usernames = ["admin"]

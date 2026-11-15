@@ -2,6 +2,8 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -72,12 +74,35 @@ func initDB() error {
 			bio      TEXT NOT NULL DEFAULT '',
 			avatar   TEXT NOT NULL DEFAULT ''
 		);
+		CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+			kind UNINDEXED,
+			ref_id UNINDEXED,
+			thread_id UNINDEXED,
+			title,
+			body,
+			updated_at UNINDEXED
+		);
 	`)
 	if err != nil {
 		return err
 	}
-	cleanupOrphanDrafts()
-	return seedBoards()
+
+	if err := ensureColumn("boards", "hidden", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn("posts", "hidden", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := seedBoards(); err != nil {
+		return err
+	}
+
+	checkConsistency()
+
+	if err := rebuildSearchIndex(); err != nil {
+		log.Printf("search rebuild: %v", err)
+	}
+	return nil
 }
 
 func seedBoards() error {
@@ -96,28 +121,24 @@ func seedBoards() error {
 	}
 	return nil
 }
-
-// 清理无上下文的坏草稿（历史 bug 遗留）
-func cleanupOrphanDrafts() {
-	rows, err := db.Query(`SELECT id, file_path FROM drafts WHERE board_id = '' AND thread_id = ''`)
+func ensureColumn(table, column, definition string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
-		return
+		return err
 	}
-	var rels []string
-	var ids []string
+	defer rows.Close()
 	for rows.Next() {
-		var id, rel string
-		_ = rows.Scan(&id, &rel)
-		ids = append(ids, id)
-		if rel != "" {
-			rels = append(rels, rel)
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
 		}
 	}
-	rows.Close()
-	for _, id := range ids {
-		_, _ = db.Exec(`DELETE FROM drafts WHERE id = ?`, id)
-	}
-	for _, rel := range rels {
-		_ = os.Remove(rel)
-	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
 }

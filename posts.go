@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -34,6 +35,15 @@ func (s *session) handleSubmit(valueJSON string) {
 		s.submitEditThread(fields["title"], fields["body"])
 	case "profile_edit":
 		s.submitProfile(fields["nickname"], fields["bio"])
+	case "search":
+		q := strings.TrimSpace(fields["query"])
+		if q == "" {
+			s.showSearch("error.query_required")
+			return
+		}
+		s.showSearchResults(q, 1)
+	case "board_new":
+		s.submitBoardNew(fields["board_id"], fields["board_name"], fields["board_desc"])
 	default:
 		s.sendOutput("No form on this screen.\r\n")
 		s.repaint()
@@ -68,10 +78,10 @@ func (s *session) submitNewThread(title, body, draftID string) {
 	}
 
 	boardID := s.boardID
-
 	id := newID("t")
-	rel, err := writePostFile(id, []byte(body))
+	rel, err := writeThreadFile(id, []byte(body))
 	if err != nil {
+		log.Printf("write thread file: %v", err)
 		s.showNewThreadErr("error.save_failed")
 		return
 	}
@@ -85,6 +95,9 @@ func (s *session) submitNewThread(title, body, draftID string) {
 		_ = os.Remove(rel)
 		s.showNewThreadErr("error.save_failed")
 		return
+	}
+	if err := indexThread(id); err != nil {
+		log.Printf("index thread %s: %v", id, err)
 	}
 
 	if draftID != "" {
@@ -117,17 +130,17 @@ func (s *session) submitReply(body, draftID string) {
 	}
 
 	threadID := s.threadID
-
 	id := newID("p")
-	rel, err := writePostFile(id, []byte(body))
+	rel, err := writeReplyFile(threadID, id, []byte(body))
 	if err != nil {
+		log.Printf("write reply file: %v", err)
 		s.showReplyErr("error.save_failed")
 		return
 	}
 	now := time.Now().Unix()
 	_, err = db.Exec(
-		`INSERT INTO posts(id, thread_id, author_id, file_path, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO posts(id, thread_id, author_id, file_path, created_at, updated_at, hidden)
+		 VALUES (?, ?, ?, ?, ?, ?, 0)`,
 		id, threadID, s.userID, rel, now, now,
 	)
 	if err != nil {
@@ -136,6 +149,9 @@ func (s *session) submitReply(body, draftID string) {
 		return
 	}
 	_, _ = db.Exec(`UPDATE threads SET reply_count = reply_count + 1, updated_at = ? WHERE id = ?`, now, threadID)
+	if err := indexPost(id); err != nil {
+		log.Printf("index post %s: %v", id, err)
+	}
 
 	if draftID != "" {
 		s.removeDraft(draftID)
@@ -196,5 +212,63 @@ func (s *session) submitEditThread(title, body string) {
 		s.showEditThreadErr("error.save_failed")
 		return
 	}
+	if err := indexThread(s.threadID); err != nil {
+		log.Printf("reindex thread %s: %v", s.threadID, err)
+	}
 	s.showThreadRead()
+}
+
+// submitBoardNew 管理员创建新面板。
+func (s *session) submitBoardNew(boardID, name, desc string) {
+	if !s.isAdmin {
+		s.showHome("", "")
+		return
+	}
+	boardID = strings.ToLower(strings.TrimSpace(boardID))
+	name = strings.TrimSpace(name)
+	desc = strings.TrimSpace(desc)
+
+	if !isValidBoardID(boardID) {
+		s.showBoardNew("error.board_id_invalid")
+		return
+	}
+	if name == "" {
+		s.showBoardNew("error.board_name_required")
+		return
+	}
+	if len(name) > 40 {
+		s.showBoardNew("error.board_name_too_long")
+		return
+	}
+	if len(desc) > 200 {
+		s.showBoardNew("error.board_desc_too_long")
+		return
+	}
+	var exists int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM boards WHERE id = ?`, boardID).Scan(&exists)
+	if exists > 0 {
+		s.showBoardNew("error.board_exists")
+		return
+	}
+	_, err := db.Exec(
+		`INSERT INTO boards(id, name, description, created_at, hidden) VALUES (?, ?, ?, ?, 0)`,
+		boardID, name, desc, time.Now().Unix())
+	if err != nil {
+		s.showBoardNew("error.save_failed")
+		return
+	}
+	s.showAdminBoards()
+}
+
+// isValidBoardID 只允许 2-20 字符的 a-z 0-9 _ -
+func isValidBoardID(id string) bool {
+	if len(id) < 2 || len(id) > 20 {
+		return false
+	}
+	for _, r := range id {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

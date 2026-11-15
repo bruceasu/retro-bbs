@@ -10,7 +10,7 @@ func (s *session) showThreadList(flashKey, flashArg string) {
 	s.screen = "thread_list"
 
 	var boardName string
-	_ = db.QueryRow(`SELECT name FROM boards WHERE id = ?`, s.boardID).Scan(&boardName)
+	_ = db.QueryRow(`SELECT name FROM boards WHERE id = ? AND hidden = 0`, s.boardID).Scan(&boardName)
 	if boardName == "" {
 		s.boardID = ""
 		s.showBoards()
@@ -113,7 +113,7 @@ func (s *session) showThreadRead() {
 	rows, err := db.Query(
 		`SELECT p.author_id, u.username, p.file_path, p.created_at
 		 FROM posts p JOIN users u ON u.id = p.author_id
-		 WHERE p.thread_id = ? ORDER BY p.created_at ASC`, s.threadID,
+		 WHERE p.thread_id = ? AND p.hidden = 0 ORDER BY p.created_at ASC`, s.threadID,
 	)
 	if err == nil {
 		defer rows.Close()
@@ -135,9 +135,16 @@ func (s *session) showThreadRead() {
 	menu := []MenuItem{
 		{Key: "r", LabelKey: "menu.reply", Action: "reply"},
 		{Key: "i", LabelKey: imagesLabelKey(s.imagesOn), Action: "toggle_images"},
+		{Key: "m", LabelKey: "menu.reply_manage", Action: "reply_manage"},
 	}
 	if authorID == s.userID && s.userID != "" && cfg.Posts.AllowEdit {
 		menu = append(menu, MenuItem{Key: "e", LabelKey: "menu.edit_thread", Action: "edit_thread"})
+	}
+	if s.userID != "" && (authorID == s.userID || s.isAdmin) {
+		menu = append(menu, MenuItem{Key: "d", LabelKey: "menu.delete", Action: "delete_thread"})
+	}
+	if s.isAdmin {
+		menu = append(menu, MenuItem{Key: "x", LabelKey: "menu.purge", Action: "purge_thread"})
 	}
 	menu = append(menu, MenuItem{Key: "b", LabelKey: "menu.back_threads", Action: "back"})
 	sc.Menu = menu
@@ -145,7 +152,6 @@ func (s *session) showThreadRead() {
 	s.sendScreen(sc)
 }
 
-// showNewThread 新增 draftID 参数；进入时记录 prevScreen。
 func (s *session) showNewThread(errKey, title, body, draftID string) {
 	if s.screen != "new_thread" {
 		s.prevScreen = s.screen
@@ -174,7 +180,6 @@ func (s *session) showNewThread(errKey, title, body, draftID string) {
 
 func (s *session) showNewThreadErr(errKey string) { s.showNewThread(errKey, "", "", "") }
 
-// showReply 进入时记录 prevScreen。
 func (s *session) showReply(errKey, body, draftID string) {
 	if s.screen != "reply" {
 		s.prevScreen = s.screen

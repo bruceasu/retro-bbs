@@ -132,6 +132,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.screen = &sc
 				m.selected = 0
+				m.lastEscAt = time.Time{}
 
 				if sc.Screen == "bye" {
 					m.client.Close()
@@ -155,7 +156,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "response":
-			// 服务端错误响应：3 秒 flash 提示，不再是静默
 			if v.msg.OK != nil && !*v.msg.OK && v.msg.Error != nil {
 				m.lastOutput = "[error " + v.msg.Error.Code + "] " + v.msg.Error.Message
 				m.flashUntil = time.Now().Add(3 * time.Second)
@@ -185,7 +185,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(v)
 	}
 
-	// 非按键消息转给 list / viewport（cursor blink 等）
 	if m.screen != nil && m.form == nil {
 		switch m.screen.Screen {
 		case "thread_list":
@@ -232,7 +231,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.screen == nil {
-		if k.Type == tea.KeyRunes && string(k.Runes) == "q" {
+		if len(k.Runes) > 0 && strings.ToLower(string(k.Runes)) == "q" {
 			return m, tea.Quit
 		}
 		return m, nil
@@ -255,9 +254,12 @@ func (m Model) screenName() string {
 	return m.screen.Screen
 }
 
-// ---------- 表单 ----------
-
 func (m Model) handleFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if k.Type == tea.KeyEsc {
+		if m.escDoublePress() {
+			return m, nil
+		}
+	}
 	action, cmd := m.form.UpdateKey(k)
 	switch action {
 	case formCancel:
@@ -286,46 +288,67 @@ func (m Model) handleFormKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// ---------- thread_list ----------
 func (m Model) handleThreadListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
+	sc := m.screen
+
 	if len(k.Runes) > 0 {
 		s := string(k.Runes)
-		switch s {
-		case "n", "N":
-			m.send("command", "new_thread")
-			return m, nil
-		case "i", "I":
-			m.send("command", "toggle_images")
-			return m, nil
-		case "p", "P":
-			m.send("command", "profile")
-			return m, nil
-		case "H", "?":
-			m.send("command", "help")
-			return m, nil
-		case "L":
-			m.toggleLang()
-			return m, nil
-		case "b", "B":
-			m.send("back", "")
-			return m, nil
-		case "q", "Q":
-			m.client.Close()
-			return m, tea.Quit
-		case "[":
+
+		// 1. 菜单项匹配（大小写不敏感）
+		for _, it := range sc.Menu {
+			if it.Key != "" && strings.EqualFold(it.Key, s) {
+				if it.Action == "lang" {
+					m.toggleLang()
+					return m, nil
+				}
+				if strings.HasPrefix(it.Action, "lang:") {
+					m.applyLang(it.Action[5:])
+					return m, nil
+				}
+				m.send("select", it.Action)
+				return m, nil
+			}
+		}
+
+		// 2. 服务端分页
+		if s == "[" {
 			m.send("page", "prev")
 			return m, nil
-		case "]":
+		}
+		if s == "]" {
 			m.send("page", "next")
 			return m, nil
 		}
-		if len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
-			for _, it := range m.screen.Menu {
-				if strings.EqualFold(it.Key, s) {
-					m.send("select", it.Action)
-					return m, nil
-				}
-			}
+
+		// 3. 全局命令 fallback
+		lk := strings.ToLower(s)
+		switch lk {
+		case "n":
+			m.send("command", "new_thread")
+			return m, nil
+		case "i":
+			m.send("command", "toggle_images")
+			return m, nil
+		case "p":
+			m.send("command", "profile")
+			return m, nil
+		case "s":
+			m.send("command", "search")
+			return m, nil
+		case "b":
+			m.send("back", "")
+			return m, nil
+		case "q":
+			m.client.Close()
+			return m, tea.Quit
+		}
+		if s == "H" || s == "?" {
+			m.send("command", "help")
+			return m, nil
+		}
+		if s == "G" {
+			m.toggleLang()
+			return m, nil
 		}
 	}
 
@@ -353,44 +376,77 @@ func (m Model) handleThreadListKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// ---------- thread_read ----------
 func (m Model) handleThreadReadKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	sc := m.screen
 	hasMenu := len(sc.Menu) > 0
 
 	if len(k.Runes) > 0 {
 		s := string(k.Runes)
-		switch s {
-		case "r", "R":
-			m.send("command", "reply")
-			return m, nil
-		case "e", "E":
-			m.send("command", "edit_thread")
-			return m, nil
-		case "i", "I":
-			m.send("command", "toggle_images")
-			return m, nil
-		case "b", "B":
-			m.send("back", "")
-			return m, nil
-		case "H", "?":
-			m.send("command", "help")
-			return m, nil
-		case "L":
-			m.toggleLang()
-			return m, nil
-		case "q", "Q":
-			m.client.Close()
-			return m, tea.Quit
-		case "j":
+
+		// 1. 菜单项匹配（大小写不敏感）
+		for _, it := range sc.Menu {
+			if it.Key != "" && strings.EqualFold(it.Key, s) {
+				if it.Action == "lang" {
+					m.toggleLang()
+					return m, nil
+				}
+				if strings.HasPrefix(it.Action, "lang:") {
+					m.applyLang(it.Action[5:])
+					return m, nil
+				}
+				m.send("select", it.Action)
+				return m, nil
+			}
+		}
+
+		// 2. j/k 菜单导航
+		lk := strings.ToLower(s)
+		if lk == "j" {
 			if hasMenu {
 				m.selected = (m.selected + 1) % len(sc.Menu)
 			}
 			return m, nil
-		case "k":
+		}
+		if lk == "k" {
 			if hasMenu {
 				m.selected = (m.selected - 1 + len(sc.Menu)) % len(sc.Menu)
 			}
+			return m, nil
+		}
+
+		// 3. 全局命令 fallback
+		switch lk {
+		case "n":
+			m.send("command", "new_thread")
+			return m, nil
+		case "r":
+			m.send("command", "reply")
+			return m, nil
+		case "e":
+			m.send("command", "edit_thread")
+			return m, nil
+		case "i":
+			m.send("command", "toggle_images")
+			return m, nil
+		case "p":
+			m.send("command", "profile")
+			return m, nil
+		case "s":
+			m.send("command", "search")
+			return m, nil
+		case "b":
+			m.send("back", "")
+			return m, nil
+		case "q":
+			m.client.Close()
+			return m, tea.Quit
+		}
+		if s == "H" || s == "?" {
+			m.send("command", "help")
+			return m, nil
+		}
+		if s == "G" {
+			m.toggleLang()
 			return m, nil
 		}
 	}
@@ -405,9 +461,13 @@ func (m Model) handleThreadReadKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyLeft:
 		m.send("back", "")
 		return m, nil
-	case tea.KeyRight:
+	case tea.KeyRight, tea.KeyEnter:
 		if hasMenu {
 			it := sc.Menu[m.selected]
+			if it.Action == "lang" {
+				m.toggleLang()
+				return m, nil
+			}
 			if strings.HasPrefix(it.Action, "lang:") {
 				m.applyLang(it.Action[5:])
 				return m, nil
@@ -425,16 +485,6 @@ func (m Model) handleThreadReadKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selected = (m.selected + 1) % len(sc.Menu)
 		}
 		return m, nil
-	case tea.KeyEnter:
-		if hasMenu {
-			it := sc.Menu[m.selected]
-			if strings.HasPrefix(it.Action, "lang:") {
-				m.applyLang(it.Action[5:])
-				return m, nil
-			}
-			m.send("select", it.Action)
-		}
-		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -442,7 +492,6 @@ func (m Model) handleThreadReadKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// ---------- 其他菜单屏 ----------
 func (m Model) handleMenuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	sc := m.screen
 	hasMenu := len(sc.Menu) > 0
@@ -460,53 +509,26 @@ func (m Model) handleMenuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if len(k.Runes) > 0 {
 		s := string(k.Runes)
-		switch s {
-		case "j":
-			if hasMenu {
-				m.selected = (m.selected + 1) % len(sc.Menu)
+
+		// 0. confirm 屏：Y/N 直接触发（优先于一切）
+		if sc.Screen == "delete_confirm" || sc.Screen == "purge_confirm" {
+			switch strings.ToLower(s) {
+			case "y":
+				m.send("command", "confirm_yes")
+				return m, nil
+			case "n":
+				m.send("command", "confirm_no")
+				return m, nil
 			}
-			return m, nil
-		case "k":
-			if hasMenu {
-				m.selected = (m.selected - 1 + len(sc.Menu)) % len(sc.Menu)
-			}
-			return m, nil
-		case "n", "N":
-			m.send("command", "new_thread")
-			return m, nil
-		case "r", "R":
-			m.send("command", "reply")
-			return m, nil
-		case "e", "E":
-			m.send("command", "edit_thread")
-			return m, nil
-		case "i", "I":
-			m.send("command", "toggle_images")
-			return m, nil
-		case "p", "P":
-			m.send("command", "profile")
-			return m, nil
-		case "H", "?":
-			m.send("command", "help")
-			return m, nil
-		case "L":
-			m.toggleLang()
-			return m, nil
-		case "b", "B":
-			m.send("back", "")
-			return m, nil
-		case "q", "Q":
-			m.client.Close()
-			return m, tea.Quit
-		case "[":
-			m.send("page", "prev")
-			return m, nil
-		case "]":
-			m.send("page", "next")
-			return m, nil
 		}
+
+		// 1. 菜单项匹配（大小写不敏感）
 		for _, it := range sc.Menu {
 			if it.Key != "" && strings.EqualFold(it.Key, s) {
+				if it.Action == "lang" {
+					m.toggleLang()
+					return m, nil
+				}
 				if strings.HasPrefix(it.Action, "lang:") {
 					m.applyLang(it.Action[5:])
 					return m, nil
@@ -514,6 +536,67 @@ func (m Model) handleMenuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.send("select", it.Action)
 				return m, nil
 			}
+		}
+
+		// 2. j/k 全局导航
+		lk := strings.ToLower(s)
+		if lk == "j" {
+			if hasMenu {
+				m.selected = (m.selected + 1) % len(sc.Menu)
+			}
+			return m, nil
+		}
+		if lk == "k" {
+			if hasMenu {
+				m.selected = (m.selected - 1 + len(sc.Menu)) % len(sc.Menu)
+			}
+			return m, nil
+		}
+
+		// 3. 服务端分页
+		if s == "[" {
+			m.send("page", "prev")
+			return m, nil
+		}
+		if s == "]" {
+			m.send("page", "next")
+			return m, nil
+		}
+
+		// 4. 全局命令 fallback
+		switch lk {
+		case "n":
+			m.send("command", "new_thread")
+			return m, nil
+		case "r":
+			m.send("command", "reply")
+			return m, nil
+		case "e":
+			m.send("command", "edit_thread")
+			return m, nil
+		case "i":
+			m.send("command", "toggle_images")
+			return m, nil
+		case "p":
+			m.send("command", "profile")
+			return m, nil
+		case "s":
+			m.send("command", "search")
+			return m, nil
+		case "b":
+			m.send("back", "")
+			return m, nil
+		case "q":
+			m.client.Close()
+			return m, tea.Quit
+		}
+		if s == "H" || s == "?" {
+			m.send("command", "help")
+			return m, nil
+		}
+		if s == "G" {
+			m.toggleLang()
+			return m, nil
 		}
 		return m, nil
 	}
@@ -532,19 +615,13 @@ func (m Model) handleMenuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyLeft:
 		m.send("back", "")
 		return m, nil
-	case tea.KeyRight:
+	case tea.KeyRight, tea.KeyEnter:
 		if hasMenu {
 			it := sc.Menu[m.selected]
-			if strings.HasPrefix(it.Action, "lang:") {
-				m.applyLang(it.Action[5:])
+			if it.Action == "lang" {
+				m.toggleLang()
 				return m, nil
 			}
-			m.send("select", it.Action)
-		}
-		return m, nil
-	case tea.KeyEnter:
-		if hasMenu {
-			it := sc.Menu[m.selected]
 			if strings.HasPrefix(it.Action, "lang:") {
 				m.applyLang(it.Action[5:])
 				return m, nil
@@ -562,11 +639,9 @@ func (m Model) handleMenuKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// ---------- helpers ----------
-
 func (m *Model) escDoublePress() bool {
 	now := time.Now()
-	if now.Sub(m.lastEscAt) < 200*time.Millisecond {
+	if now.Sub(m.lastEscAt) < 500*time.Millisecond {
 		return true
 	}
 	m.lastEscAt = now
@@ -603,8 +678,6 @@ func (m *Model) send(action, value string) {
 		debugf("send failed: %v", err)
 	}
 }
-
-// ---------- View ----------
 
 func (m Model) View() string {
 	if m.screen == nil {
@@ -692,6 +765,7 @@ func (m Model) viewThreadListBody(width, height int) string {
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftBox, "  ", rightBox)
 }
+
 func (m Model) viewThreadReadBody(width, height int) string {
 	var b strings.Builder
 	b.WriteString(m.readViewport.View())

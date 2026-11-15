@@ -37,8 +37,7 @@
       selectionBackground: '#264f78'
     },
     convertEol: true,
-    scrollback: 0,
-    //disableStdin: true
+    scrollback: 0
   });
 
   const fit = new FitAddon.FitAddon();
@@ -74,7 +73,6 @@
   let selected = 0;
   let menuOffset = 0;
 
-  // thread_read 滚动状态
   let readLines = [];
   let readOffset = 0;
   let readVisibleRows = 10;
@@ -88,8 +86,7 @@
   const btnDraft = document.getElementById('editor-draft');
   let editorForm = null;
 
-  // ---------- 宽度工具（CJK 支持） ----------
-
+  // ---------- 宽度工具 ----------
   const ANSI_RE = /\x1b\[[0-9;]*[mK]/g;
 
   function charWidth(code) {
@@ -127,7 +124,6 @@
   }
 
   function fitWidth(s, width) {
-    // 截断到给定宽度（保留 ANSI 完整）
     const parts = [];
     let last = 0;
     let m;
@@ -153,8 +149,7 @@
     return out;
   }
 
-  // ---------- 内容行构建 ----------
-
+  // ---------- 内容渲染 ----------
   const KIND_COLOR = {
     err: '\x1b[31m',
     ok: '\x1b[32m',
@@ -206,12 +201,8 @@
   }
 
   // ---------- 布局 ----------
-
   function layout() {
-    return {
-      cols: term.cols,
-      rows: term.rows
-    };
+    return { cols: term.cols, rows: term.rows };
   }
 
   function clear() { term.write('\x1b[2J\x1b[H'); }
@@ -232,19 +223,16 @@
   }
 
   // ---------- 各屏渲染 ----------
-
   function paint() {
     if (!screen) return;
     const { cols, rows } = layout();
     clear();
 
-    // Header
     term.write(headerText(screen) + '\r\n\r\n');
 
-    // 表单屏走 overlay，xterm 只画一个占位
     if (screen.form) {
       term.write('\x1b[90m  (editing in overlay...)\x1b[0m\r\n');
-      paintStatus(cols);
+      paintStatus();
       return;
     }
 
@@ -268,17 +256,14 @@
   function paintSinglePane(cols, rows) {
     const { innerWidth, contentRows } = singlePaneLayout(cols, rows);
 
-    // 顶部
     term.write('  \x1b[90m╭' + '─'.repeat(innerWidth) + '╮\x1b[0m\r\n');
 
-    // 内容行
     const lines = [];
     for (const l of (screen.lines || [])) lines.push(renderLine(l));
     lines.push('');
 
     const menu = screen.menu || [];
     if (menu.length > 0) {
-      // 计算菜单可见范围
       const menuAreaRows = contentRows - lines.length - 1;
       const visible = Math.max(1, menuAreaRows);
       if (menu.length > visible) {
@@ -300,7 +285,6 @@
       }
     }
 
-    // 渲染内容（不足补空行）
     for (let i = 0; i < contentRows; i++) {
       const line = lines[i] || '';
       const fitted = fitWidth(line, innerWidth);
@@ -308,14 +292,13 @@
       term.write('  \x1b[90m│\x1b[0m' + padded + '\x1b[90m│\x1b[0m\r\n');
     }
 
-    // 底部
     term.write('  \x1b[90m╰' + '─'.repeat(innerWidth) + '╯\x1b[0m\r\n');
     paintStatus();
   }
 
   function singlePaneLayout(cols, rows) {
     const margin = 2;
-    const topAndHeader = 2; // header 行 + 空行
+    const topAndHeader = 2;
     const bottomBorder = 1;
     const statusBar = 1;
     const blankBeforeStatus = 1;
@@ -327,24 +310,18 @@
   function paintThreadList(cols, rows) {
     const { leftWidth, rightWidth, contentRows } = threadListLayout(cols, rows);
 
-    // 顶部边框
     term.write(
       '  \x1b[90m╭' + '─'.repeat(leftWidth) + '╮\x1b[0m  ' +
       '\x1b[42m╭' + '─'.repeat(rightWidth) + '╮\x1b[0m\r\n'
     );
 
-    // 左侧 boards（上下边框 + 内容）
     const boards = (screen.lines && screen.lines.find(l => l.kind === 'h1')) || null;
     const currentBoard = boards ? boards.raw : '';
 
-    // 缓存 boards 列表？用 screen.lines 里的信息不够，用 menu 里的 board:xxx 项反推
-    // 服务端 thread_list 的 Lines[0] 是当前 board 名。左侧 pane 只能显示当前 board，
-    // 完整 boards 列表需要另外存。这里用简化版：只显示当前 board。
     const leftContent = [
       '\x1b[1;36m' + (currentBoard || '') + '\x1b[0m'
     ];
 
-    // 右侧 threads 列表 + 滚动
     const menu = screen.menu || [];
     const visible = contentRows;
     if (menu.length > visible) {
@@ -366,7 +343,6 @@
         '  j/k · h/l\x1b[0m');
     }
 
-    // 内容行
     for (let i = 0; i < contentRows; i++) {
       const l = padRight(fitWidth(leftContent[i] || '', leftWidth), leftWidth);
       const r = padRight(fitWidth(rightContent[i] || '', rightWidth), rightWidth);
@@ -376,7 +352,6 @@
       );
     }
 
-    // 底部
     term.write(
       '  \x1b[90m╰' + '─'.repeat(leftWidth) + '╯\x1b[0m  ' +
       '\x1b[42m╰' + '─'.repeat(rightWidth) + '╯\x1b[0m\r\n'
@@ -390,39 +365,31 @@
     const leftInner = Math.min(24, Math.max(14, Math.floor(cols * 0.22)));
     const rightInner = Math.max(20, cols - margin * 2 - leftInner - gap - 4);
     const contentRows = Math.max(1, rows - 2 - 2 - 1 - 1);
-    return {
-      leftWidth: leftInner,
-      rightWidth: rightInner,
-      contentRows
-    };
+    return { leftWidth: leftInner, rightWidth: rightInner, contentRows };
   }
 
   function paintThreadRead(cols, rows) {
-    const contentTop = 2; // header 后空一行
+    const contentTop = 2;
     const statusBar = 1;
     const menuRow = 1;
     const blankBeforeMenu = 1;
     const visible = Math.max(1, rows - contentTop - statusBar - menuRow - blankBeforeMenu);
     readVisibleRows = visible;
 
-    // clamp
     const maxOff = Math.max(0, readLines.length - visible);
     if (readOffset > maxOff) readOffset = maxOff;
     if (readOffset < 0) readOffset = 0;
 
-    // 正文
     const end = Math.min(readLines.length, readOffset + visible);
     for (let i = readOffset; i < end; i++) {
       const line = readLines[i] || '';
       const fitted = fitWidth(line, cols - 2);
       term.write('  ' + fitted + '\r\n');
     }
-    // 补空行
     for (let i = end; i < readOffset + visible; i++) {
       term.write('\r\n');
     }
 
-    // 滚动指示
     if (readLines.length > visible) {
       term.write('\x1b[90m  ' + (readOffset + 1) + '/' + readLines.length +
         '  PgUp/PgDn scroll  Home/End\x1b[0m\r\n');
@@ -430,7 +397,6 @@
       term.write('\r\n');
     }
 
-    // 底部菜单（固定）
     const menu = screen.menu || [];
     if (menu.length > 0) {
       const parts = [];
@@ -451,7 +417,6 @@
   }
 
   // ---------- WebSocket ----------
-
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -464,7 +429,6 @@
       if (msg.type === 'screen') {
         handleScreen(msg.data || null);
       } else if (msg.type === 'output') {
-        // 全屏模式：output 追加到末尾会破坏布局，改为底部短暂提示
         showToast(msg.text || '');
       } else if (msg.type === 'response') {
         if (msg.ok === false && msg.error) showToast('[error ' + msg.error.code + '] ' + msg.error.message);
@@ -496,7 +460,6 @@
   }
 
   function handleScreen(sc) {
-    const prev = screen ? screen.screen : null;
     screen = sc;
     selected = 0;
     menuOffset = 0;
@@ -532,7 +495,6 @@
     lang = code;
     saveLang(code);
     if (screen && screen.screen === 'thread_read') {
-      // 重新翻译正文中的 key
       readLines = [];
       for (const l of (screen.lines || [])) readLines.push(renderLine(l));
     }
@@ -544,13 +506,13 @@
     if (!screen || !screen.menu || screen.menu.length === 0) return;
     const it = screen.menu[selected];
     if (!it) return;
+    if (it.action === 'lang') { toggleLang(); return; }
     if (it.action && it.action.startsWith('lang:')) { switchLang(it.action.slice(5)); return; }
     if (it.action === 'quit') { sendQuit(); return; }
     sendAction('select', it.action);
   }
 
   // ---------- 菜单操作 ----------
-
   function menuLen() { return screen && screen.menu ? screen.menu.length : 0; }
 
   function visibleMenuRows() {
@@ -581,7 +543,6 @@
   function readBottom() { readOffset = Math.max(0, readLines.length - readVisibleRows); paint(); }
 
   // ---------- overlay 编辑器 ----------
-
   function openEditor(sc) {
     editorForm = {
       screen: sc.screen,
@@ -695,7 +656,6 @@
   btnDraft.addEventListener('click', saveDraft);
 
   // ---------- 键盘 ----------
-
   term.onKey(({ domEvent }) => {
     const e = domEvent;
 
@@ -705,7 +665,6 @@
     }
     if (!overlay.classList.contains('hidden')) return;
 
-    // Delete 键：草稿箱删除
     if (e.key === 'Delete' || e.code === 'Delete') {
       if (screen && screen.screen === 'draft_list' && screen.menu) {
         e.preventDefault();
@@ -717,7 +676,6 @@
       return;
     }
 
-    // 方向键
     if (e.key === 'ArrowDown')  { e.preventDefault(); moveDown(); return; }
     if (e.key === 'ArrowUp')    { e.preventDefault(); moveUp(); return; }
     if (e.key === 'ArrowLeft')  { e.preventDefault(); sendAction('back', ''); return; }
@@ -725,7 +683,6 @@
     if (e.key === 'Enter')      { e.preventDefault(); activateSelected(); return; }
     if (e.key === 'Escape')     { e.preventDefault(); sendAction('back', ''); return; }
 
-    // 翻页（body 滚动 / 菜单跳页）
     if (e.key === 'PageDown') {
       e.preventDefault();
       if (screen && screen.screen === 'thread_read') readScroll(readVisibleRows);
@@ -751,41 +708,44 @@
       return;
     }
 
-    // 字符键
-    // 字符键
     if (e.key.length === 1) {
       const k = e.key;
       const lk = k.toLowerCase();
-      const isLower = k === lk;  // 小写字母或非字母字符
-      const isThreadList = screen && screen.screen === 'thread_list';
       const hasMenu = screen && screen.menu && screen.menu.length > 0;
+      const isThreadList = screen && screen.screen === 'thread_list';
+      const isThreadRead = screen && screen.screen === 'thread_read';
+      const isConfirm = screen && (screen.screen === 'delete_confirm' || screen.screen === 'purge_confirm');
 
-      // 1. 菜单项 key 优先（小写字母 / 数字 / 符号）
-      if (hasMenu && isLower) {
+      // 0. confirm 屏：Y/N 直接触发（优先于一切）
+      if (isConfirm) {
+        if (lk === 'y') { e.preventDefault(); sendCommand('confirm_yes'); return; }
+        if (lk === 'n') { e.preventDefault(); sendCommand('confirm_no'); return; }
+        if (e.key === 'Escape') { e.preventDefault(); sendCommand('confirm_no'); return; }
+        return;
+      }
+
+      // 1. 菜单项匹配（大小写不敏感）
+      if (hasMenu) {
         const hit = screen.menu.find(it => it.key && it.key.toLowerCase() === lk);
         if (hit) {
           e.preventDefault();
-          if (hit.action && hit.action.startsWith('lang:')) {
-            switchLang(hit.action.slice(5));
-          } else if (hit.action === 'quit') {
-            sendQuit();
-          } else {
-            sendAction('select', hit.action);
-          }
+          if (hit.action === 'lang') { toggleLang(); }
+          else if (hit.action && hit.action.startsWith('lang:')) switchLang(hit.action.slice(5));
+          else if (hit.action === 'quit') sendQuit();
+          else sendAction('select', hit.action);
           return;
         }
       }
 
-      // 2. j/k 全局菜单导航
+      // 2. j/k 全局导航
       if (lk === 'j') { e.preventDefault(); moveDown(); return; }
       if (lk === 'k') { e.preventDefault(); moveUp(); return; }
 
-      // 3. vim 翻页仅在 thread_list 屏
+      // 3. thread_list vim 翻页（不含 G）
       if (isThreadList) {
         if (lk === 'h') { e.preventDefault(); pageUp(); return; }
         if (lk === 'l') { e.preventDefault(); pageDown(); return; }
         if (k === 'g')  { e.preventDefault(); menuTop(); return; }
-        if (k === 'G')  { e.preventDefault(); menuBottom(); return; }
         if (lk === 'u') { e.preventDefault(); menuHalfUp(); return; }
         if (lk === 'd') { e.preventDefault(); menuHalfDown(); return; }
         if (lk === 'f') { e.preventDefault(); pageDown(); return; }
@@ -795,16 +755,17 @@
       if (k === '[') { e.preventDefault(); sendAction('page', 'prev'); return; }
       if (k === ']') { e.preventDefault(); sendAction('page', 'next'); return; }
 
-      // 5. 全局命令（大小写都生效，作为菜单项 key 的 fallback）
+      // 5. 全局命令 fallback
       if (lk === 'n') { e.preventDefault(); sendCommand('new_thread'); return; }
       if (lk === 'r') { e.preventDefault(); sendCommand('reply'); return; }
       if (lk === 'e') { e.preventDefault(); sendCommand('edit_thread'); return; }
       if (lk === 'i') { e.preventDefault(); sendCommand('toggle_images'); return; }
       if (lk === 'p') { e.preventDefault(); sendCommand('profile'); return; }
+      if (lk === 's') { e.preventDefault(); sendCommand('search'); return; }
       if (lk === 'b') { e.preventDefault(); sendAction('back', ''); return; }
       if (lk === 'q') { e.preventDefault(); sendQuit(); return; }
       if (k === 'H' || k === '?') { e.preventDefault(); sendCommand('help'); return; }
-      if (k === 'L') { e.preventDefault(); toggleLang(); return; }
+      if (k === 'G') { e.preventDefault(); toggleLang(); return; }
     }
   });
 

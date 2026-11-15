@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -25,6 +29,20 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "backup":
+			runBackupCmd()
+			return
+		case "restore":
+			runRestoreCmd()
+			return
+		case "help", "--help", "-h":
+			printUsage()
+			return
+		}
+	}
+
 	root := resolveRoot()
 	paths = resolvePaths(root)
 
@@ -41,6 +59,8 @@ func main() {
 	cfg.Storage.DataDir = resolvePath(root, cfg.Storage.DataDir)
 	paths.Data = cfg.Storage.DataDir
 
+	loginLimiter = newRateLimiter(cfg.Security.LoginAttemptsPerMin, time.Minute)
+
 	if err := initI18n(); err != nil {
 		log.Fatalf("i18n: %v", err)
 	}
@@ -53,13 +73,15 @@ func main() {
 	http.HandleFunc("/ws", handleWS)
 
 	log.Printf("RETRO BBS listening on %s", cfg.Server.HTTPAddr)
-	log.Printf("  root:   %s", paths.Root)
-	log.Printf("  web:    %s", paths.Web)
-	log.Printf("  data:   %s", paths.Data)
-	log.Printf("  config: %s", paths.Config)
+	log.Printf("  root:      %s", paths.Root)
+	log.Printf("  web:       %s", paths.Web)
+	log.Printf("  data:      %s", paths.Data)
+	log.Printf("  config:    %s", paths.Config)
 	if paths.DotEnv != "" {
-		log.Printf("  dotenv: %s", paths.DotEnv)
+		log.Printf("  dotenv:    %s", paths.DotEnv)
 	}
+	log.Printf("  conn/user: %d", cfg.Security.MaxConnectionsPerUser)
+	log.Printf("  login/min: %d", cfg.Security.LoginAttemptsPerMin)
 	log.Fatal(http.ListenAndServe(cfg.Server.HTTPAddr, nil))
 }
 
@@ -69,11 +91,42 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("upgrade: %v", err)
 		return
 	}
+	remoteAddr := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		remoteAddr = host
+	}
 	s := &session{
-		conn:     conn,
-		screen:   "home",
-		page:     1,
-		imagesOn: cfg.Images.ShowByDefault,
+		conn:       conn,
+		screen:     "home",
+		page:       1,
+		imagesOn:   cfg.Images.ShowByDefault,
+		remoteAddr: remoteAddr,
 	}
 	s.run()
+}
+
+func printUsage() {
+	fmt.Println(`RETRO BBS
+
+Usage:
+  retro-bbs                    start the server (default)
+  retro-bbs backup             create a backup archive in ./backups/
+  retro-bbs restore <zip>      restore data from an archive (data/ must not exist)
+  retro-bbs help               show this help
+
+Environment:
+  BBS_ROOT     override the root directory (default: executable dir, or CWD)
+  BBS_URL      TUI WebSocket URL (only for cmd/tui)
+  BBS_DEBUG    set to 1 for verbose TUI logging
+  BBS_LANG     TUI language (en / zh)
+
+Backup / restore workflow:
+  stop the server
+  retro-bbs backup
+  # or
+  mv data data.old
+  retro-bbs restore backups/bbs-YYYYMMDD-HHMMSS.zip
+  start the server again (consistency check + search rebuild run at startup)
+
+See docs/backup.md for details.`)
 }

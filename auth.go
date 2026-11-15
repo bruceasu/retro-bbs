@@ -21,6 +21,8 @@ const (
 	argonSaltLen = 16
 )
 
+var loginLimiter *rateLimiter
+
 func hashPassword(pw string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -61,7 +63,6 @@ func newID(prefix string) string {
 	return prefix + "_" + hex.EncodeToString(b)
 }
 
-// hasSpace 报告字符串是否含任意空白字符（空格、制表、换行、Unicode 空白）。
 func hasSpace(s string) bool {
 	for _, r := range s {
 		if unicode.IsSpace(r) {
@@ -71,12 +72,53 @@ func hasSpace(s string) bool {
 	return false
 }
 
+func isAdminUsername(name string) bool {
+	for _, u := range cfg.Admin.Usernames {
+		if strings.EqualFold(u, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// setUser 全文件唯一一处定义。设置会话用户，管理连接数占位。
+// id=="" 表示登出，会释放连接槽位。
+func (s *session) setUser(id, username, nickname string) error {
+	if s.connUserID != "" {
+		conns.Release(s.connUserID)
+		s.connUserID = ""
+	}
+	if id != "" {
+		if !conns.Acquire(id, cfg.Security.MaxConnectionsPerUser) {
+			return fmt.Errorf("error.too_many_connections")
+		}
+		s.connUserID = id
+	}
+	s.userID = id
+	s.username = username
+	s.nickname = nickname
+	s.isAdmin = id != "" && isAdminUsername(username)
+	return nil
+}
+
+func (s *session) releaseConn() {
+	if s.connUserID != "" {
+		conns.Release(s.connUserID)
+		s.connUserID = ""
+	}
+}
+
 func (s *session) doLogin(username, password string) error {
 	username = strings.TrimSpace(username)
-	if password == "" || hasSpace(password) {
-		// 不区分"格式不对"和"密码错误"，避免信息泄露
+	if username == "" || password == "" || hasSpace(password) {
 		return fmt.Errorf("error.invalid_login")
 	}
+
+	rlKey := strings.ToLower(username)
+	if loginLimiter != nil && !loginLimiter.Allow(rlKey) {
+		return fmt.Errorf("error.too_many_attempts")
+	}
+
 	var id, hash, status string
 	err := db.QueryRow(
 		`SELECT id, password_hash, status FROM users WHERE username = ?`, username,
@@ -84,8 +126,11 @@ func (s *session) doLogin(username, password string) error {
 	if err != nil || status != "active" || !verifyPassword(password, hash) {
 		return fmt.Errorf("error.invalid_login")
 	}
-	s.userID, s.username, s.nickname = id, username, username
-	return nil
+
+	if loginLimiter != nil {
+		loginLimiter.Reset(rlKey)
+	}
+	return s.setUser(id, username, username)
 }
 
 func (s *session) doRegister(username, password string) error {
@@ -114,6 +159,5 @@ func (s *session) doRegister(username, password string) error {
 		}
 		return fmt.Errorf("error.register_failed")
 	}
-	s.userID, s.username, s.nickname = id, username, username
-	return nil
+	return s.setUser(id, username, username)
 }

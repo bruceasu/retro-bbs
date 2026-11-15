@@ -30,5 +30,5 @@ max_connections_per_user = 3
 [search]
 enabled = true
 
-[i18n]
-default_lang = "en"
+[admin]
+usernames = ["victor"]
